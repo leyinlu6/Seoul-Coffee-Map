@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>서울 전통特色 카페 지도</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+  <style>
+    body { margin:0; font-family: "Noto Sans KR", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+    #map { position: fixed; top: 0; bottom: 0; left: 35%; right: 0; }
+    #sidebar {
+      position: fixed; left: 0; top: 0; bottom: 0; width: 35%;
+      overflow: auto; padding: 18px; box-sizing: border-box;
+      background: #fff9f1; border-right: 1px solid #eee;
+    }
+    h1 { margin:0 0 12px 0; font-size: 20px; }
+    p.lead { margin:0 0 18px 0; color:#555; }
+    .place { margin-bottom:12px; padding:12px; border-radius:8px; background:#fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .place h3 { margin:0 0 6px 0; font-size:16px; }
+    .place button { margin-top:8px; display:inline-block; padding:6px 10px; border:0; border-radius:6px; background:#2b7cff; color:white; cursor:pointer; }
+    .small { font-size:13px; color:#666; margin-top:6px; }
+    .attribution { font-size:12px; color:#999; margin-top:14px; }
+    a.navlink { color:#2b7cff; text-decoration:none; }
+    @media (max-width:900px) {
+      #sidebar { width:100%; height: 45%; position: fixed; bottom: 55%; left:0; right:0; overflow:auto; }
+      #map { top:45%; left:0; }
+    }
+    img.popup-thumb { width:100%; height:140px; object-fit:cover; border-radius:6px; display:block; margin-bottom:8px; }
+
+    /* loading overlay */
+    #loading {
+      position: fixed; left:35%; top:0; right:0; bottom:0;
+      display:flex; align-items:center; justify-content:center;
+      background: rgba(255,255,255,0.8); z-index: 9999;
+      font-size:16px; color:#333;
+    }
+    #loading.hidden { display:none; }
+
+    /* small spinner */
+    .spinner {
+      width:36px; height:36px; border-radius:50%; border:4px solid #eee;
+      border-top-color:#2b7cff; animation: spin 1s linear infinite; margin-right:12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <h1>서울 전통特色 카페 지도</h1>
+    <p class="lead">페이지를 열면 곧바로 모든 카페의 마커를 불러옵니다. 마커를 클릭하면 사진·간단 소개·네이버 지도 링크가 표시됩니다.</p>
+
+    <div id="places-list"></div>
+
+    <div class="attribution">
+      데이터: 사용자가 제공한 카페명 · 위치는 클라이언트에서 OSM Nominatim으로 조회됩니다.<br/>
+      이미지: Unsplash(대표 이미지, 필요시 교체 가능).
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div id="loading-text">카페 위치를 불러오는 중... (빠르게 완료됩니다)</div>
+  </div>
+
+  <!-- Leaflet JS + MarkerCluster -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <script>
+  const places = [
+    "을지다방",
+    "커피한약방",
+    "세운나다방",
+    "학림다방",
+    "맛남다방",
+    "커피 문화사",
+    "금성다방",
+    "대오서점",
+    "나무새 찻집",
+    "천장지구",
+    "백조다방",
+    "차마시는뜰",
+    "자작나무 이야기",
+    "낙원역",
+    "커피 한잔",
+    "머무름",
+    "인사동 찻집",
+    "아부 커피",
+    "한옥 카페",
+    "아마츄어 작업실 광장시장점",
+    "Le labo",
+    "Onion cafe",
+    "Waoak Bar",
+    "수연산방",
+    "서화커피",
+    "Haus coffee",
+    "오제도",
+    "한옥 찻집",
+    "ium1966",
+    "새소리물소리"
+  ];
+
+  function makeDescription(name) {
+    if (name.match(/다방|찻집|한약|차|차마시는|찻/)) {
+      return "전통적인 분위기의 찻집/다방입니다. 고풍스러운 인테리어와 여유로운 시간에 머물기 좋습니다.";
+    }
+    if (name.match(/서점|대오|북|book/)) {
+      return "책과 함께하는 공간으로, 조용히 읽기 좋은 장소입니다.";
+    }
+    if (name.match(/카페|coffee|Onion|Haus|Le labo|Haus/)) {
+      return "전통 요소를 현대적으로 재해석한 카페입니다. 로컬 원두를 사용하는 경우가 많습니다.";
+    }
+    if (name.match(/역|광장시장|낙원/)) {
+      return "교통이 편한 지역의 전통적 명소 근처에 위치한 카페/지점입니다.";
+    }
+    return "서울 전통/특색이 느껴지는 카페입니다. 방문 전 네이버 지도로 상세 위치와 영업시간을 확인하세요.";
+  }
+
+  // Build sidebar list
+  const listContainer = document.getElementById('places-list');
+  places.forEach((p, idx) => {
+    const div = document.createElement('div');
+    div.className = 'place';
+    div.innerHTML = `
+      <h3>${p}</h3>
+      <div class="small">${makeDescription(p)}</div>
+      <div style="margin-top:8px;">
+        <button data-idx="${idx}">지도에서 보기</button>
+        <a class="navlink" style="margin-left:8px;" href="https://map.naver.com/v5/search/${encodeURIComponent(p + ' 서울')}" target="_blank" rel="noopener">네이버 지도에서 열기</a>
+      </div>
+    `;
+    listContainer.appendChild(div);
+  });
+
+  const map = L.map('map').setView([37.5665, 126.9780], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+  // Cluster group for clearer view
+  const markersCluster = L.markerClusterGroup();
+  map.addLayer(markersCluster);
+
+  // Rate-limited concurrent geocoding: at most 4 concurrent fetches
+  async function geocodeAll(names, concurrency=4) {
+    const results = new Array(names.length);
+    let idx = 0;
+
+    async function worker() {
+      while (idx < names.length) {
+        const my = idx++;
+        const q = encodeURIComponent(names[my] + ' 서울');
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1&addressdetails=0`;
+        try {
+          const resp = await fetch(url, { headers: { 'Accept-Language': 'ko' }});
+          const json = await resp.json();
+          if (json && json.length) {
+            results[my] = { name:names[my], lat: parseFloat(json[0].lat), lon: parseFloat(json[0].lon), raw: json[0] };
+          } else {
+            results[my] = { name:names[my], error: 'no result' };
+          }
+        } catch (e) {
+          results[my] = { name:names[my], error: e.message || 'failed' };
+        }
+        // small polite delay between requests
+        await new Promise(r => setTimeout(r, 250));
+      }
+    }
+
+    // start workers
+    const workers = [];
+    for (let i=0;i<concurrency;i++) workers.push(worker());
+    await Promise.all(workers);
+    return results;
+  }
+
+  // Create popup HTML
+  function popupHtml(place) {
+    const slug = place.name.replace(/\s+/g, '_').replace(/[^\w\-]/g, '');
+    const localImg = `images/${slug}.jpg`;
+    const unsplash = `https://source.unsplash.com/featured/?${encodeURIComponent(place.name + ',korea,traditional,cafe')}`;
+    const imgTag = `<img class="popup-thumb" src="${localImg}" onerror="this.onerror=null; this.src='${unsplash}';" alt="${place.name}">`;
+    const description = makeDescription(place.name);
+    const navLink = `https://map.naver.com/v5/search/${encodeURIComponent(place.name + ' 서울')}`;
+    return `
+      <div style="width:240px;">
+        ${imgTag}
+        <strong style="font-size:15px;">${place.name}</strong>
+        <div style="margin-top:6px; font-size:13px; color:#444;">${description}</div>
+        ${place.lat ? `<div style="margin-top:6px; font-size:12px; color:#666;">위도: ${place.lat.toFixed(6)} · 경도: ${place.lon.toFixed(6)}</div>` : ''}
+        <div style="margin-top:8px;">
+          <a class="navlink" target="_blank" rel="noopener" href="${navLink}">네이버 지도에서 열기</a>
+        </div>
+      </div>
+    `;
+  }
+
+  (async function(){
+    const loading = document.getElementById('loading');
+    try {
+      const geocoded = await geocodeAll(places, 4);
+
+      const found = geocoded.filter(p => p.lat && p.lon);
+      if (found.length === 0) {
+        document.getElementById('loading-text').innerText = '위치를 찾지 못했습니다. 네이버 지도에서 검색해 주세요.';
+      } else {
+        // add markers
+        const bounds = [];
+        geocoded.forEach((p,i) => {
+          if (p.lat && p.lon) {
+            const m = L.marker([p.lat, p.lon]);
+            m.bindPopup(popupHtml(p), { maxWidth: 260 });
+            markersCluster.addLayer(m);
+            bounds.push([p.lat, p.lon]);
+            // store marker reference on sidebar button via dataset
+            const btn = document.querySelector(`#places-list button[data-idx="${i}"]`);
+            if (btn) {
+              btn.addEventListener('click', () => {
+                m.openPopup();
+                map.setView([p.lat, p.lon], 17);
+              });
+            }
+          } else {
+            // fallback button opens naver
+            const btn = document.querySelector(`#places-list button[data-idx="${i}"]`);
+            if (btn) {
+              btn.addEventListener('click', () => {
+                window.open(`https://map.naver.com/v5/search/${encodeURIComponent(places[i] + ' 서울')}`, '_blank', 'noopener');
+              });
+            }
+          }
+        });
+
+        // Fit map to bounds so markers are immediately visible
+        if (bounds.length > 0) {
+          const group = L.featureGroup(found.map(p=>L.marker([p.lat,p.lon])));
+          map.fitBounds(group.getBounds().pad(0.2));
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      document.getElementById('loading-text').innerText = '오류가 발생했습니다. 네이버 지도에서 검색해 주세요.';
+    } finally {
+      // hide loading overlay after short delay so user sees the map
+      setTimeout(()=>{ loading.classList.add('hidden'); }, 700);
+    }
+  })();
+
+  </script>
+</body>
+</html>
